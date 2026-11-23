@@ -25,7 +25,6 @@ video{display:block;width:100%;height:clamp(150px,42vh,410px);background:#080d0d
 .caption{white-space:pre-line;overflow-wrap:anywhere;font-weight:650;font-size:clamp(17px,3vw,24px);color:#a8f4d2;text-align:center}
 .caption[lang=ja]{color:#edf5f1;font-size:clamp(16px,2.6vw,21px)}
 .caption + .caption{margin-top:4px}
-#captions{min-height:2em}
 .settings{font-size:14px}
 .settings label{white-space:nowrap}
 #status{font-size:14px;color:#c1d2cf;margin:10px 0 0;overflow-wrap:anywhere}
@@ -48,10 +47,43 @@ time{color:#a9c3be;font-size:.82em;font-variant-numeric:tabular-nums}
 #quiz-options button{text-align:left}
 #quiz-feedback,#quiz-position{color:#c1d2cf}
 #quiz-error{color:#f5c5a8}
+
+/* Keep a fixed height for each enabled subtitle language. */
+#viewing-area{min-width:0;background:#192526;display:grid;gap:10px;align-self:start}
+#captions{display:grid;--caption-en-height:108px;--caption-ja-height:90px;gap:6px;width:100%;min-width:0}
+#captions .caption{height:var(--caption-en-height);min-height:0;width:100%;margin:0;padding:8px 12px;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;line-height:1.45;border:1px solid #344546;border-radius:8px;text-align:left}
+#captions .caption[lang=ja]{height:var(--caption-ja-height)}
+#subtitle-controls{min-height:36px}
+#setup{margin-bottom:12px}
+#setup summary{cursor:pointer;font-weight:650;padding:8px 0}
+#setup .settings{margin-top:16px}
+@media(max-width:600px){
+  main{padding:8px}h1{font-size:22px;margin-bottom:10px}
+  .panel{padding:8px;border-radius:12px}
+  .playback{gap:10px;margin-top:10px}
+  #viewing-area{position:sticky;top:0;z-index:5;padding:6px 0;gap:6px;box-shadow:0 6px 8px #10181980}
+  #viewing-area video{height:26vh;height:26svh;max-height:220px;border-radius:8px;object-fit:contain}
+  .playback.audio-only #viewing-area video{height:48px}
+  #captions{--caption-en-height:74px;--caption-ja-height:64px;gap:4px}
+  #captions .caption{font-size:17px;padding:4px 8px}
+  #captions .caption[lang=ja]{font-size:16px}
+  #subtitle-controls{gap:6px 16px;font-size:14px}
+  #tracks{gap:10px}.lines{height:220px}
+  .quiz-nav{gap:8px}.quiz-nav select{max-width:100%}
+  #quiz-question{font-size:18px}
+}
+@media(max-height:500px) and (orientation:landscape){
+  #viewing-area{position:sticky;top:0;z-index:5;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;padding:4px 0}
+  #viewing-area video{grid-column:1;grid-row:1 / 3;height:180px;max-height:45svh;object-fit:contain}
+  #captions{grid-column:2;grid-row:1;--caption-en-height:66px;--caption-ja-height:58px;gap:4px}
+  #captions .caption{font-size:16px;padding:4px 8px}
+  #subtitle-controls{grid-column:2;grid-row:2;font-size:13px;gap:4px 10px}
+}
 </style>
 <main>
 <h1>英語字幕プレーヤー</h1>
 <div class="panel">
+<details id="setup" open><summary>ファイル・再生設定</summary>
 <div class="files">
 <label>動画・音声ファイル <input id="media" type="file" accept="video/*,audio/*,.mp4,.webm,.mp3"></label>
 <label>英語字幕（VTT・SRT） <input id="subtitle" type="file" accept=".vtt,.srt,text/vtt"></label>
@@ -64,21 +96,25 @@ time{color:#a9c3be;font-size:.82em;font-variant-numeric:tabular-nums}
 <label><input id="follow" type="checkbox" checked> 自動スクロール</label>
 <label><input id="repeat" type="checkbox"> 字幕をリピート</label>
 </div>
+</details>
 <div class="quiz-controls">
 <label>モード <select id="mode"><option value="watch">視聴</option><option value="quiz">クイズ</option></select></label>
 </div>
 <p id="status" role="status">同じ作品の動画（または音声）と字幕を選んでください。字幕を押すと、その位置から再生します。</p>
 <div id="playback" class="playback audio-only">
+<div id="viewing-area">
 <video id="player" controls playsinline preload="metadata" aria-label="動画・音声プレーヤー"></video>
 <div class="settings" id="subtitle-controls" aria-label="字幕表示設定">
 <label><input id="show-en" type="checkbox" checked> 英語字幕</label>
 <label><input id="show-ja" type="checkbox" checked> 日本語字幕</label>
-<label id="quiz-style-label" hidden>出題形式 <select id="quiz-style"><option value="listen">リスニング（解答前は字幕なし）</option><option value="read">字幕を見ながら解く</option></select></label>
-<span id="subtitle-mode-hint" hidden>リスニング中は解答後に字幕を表示できます。</span>
 </div>
-<div id="captions">
-<div class="caption" id="caption-en" lang="en" hidden></div>
-<div class="caption" id="caption-ja" lang="ja" hidden></div>
+<div id="captions" hidden>
+<div class="caption" id="caption-en" lang="en" hidden><span></span></div>
+<div class="caption" id="caption-ja" lang="ja" hidden><span></span></div>
+</div>
+</div>
+<div class="settings"><label id="quiz-style-label" hidden>出題形式 <select id="quiz-style"><option value="listen">リスニング（解答前は字幕なし）</option><option value="read">字幕を見ながら解く</option></select></label>
+<span id="subtitle-mode-hint" hidden>リスニング中は解答後に字幕を表示できます。</span>
 </div>
 <section id="quiz" hidden aria-label="リスニングクイズ">
 <div class="quiz-nav">
@@ -112,7 +148,7 @@ const player=get('player'), media=get('media'), speed=get('speed'), offset=get('
   follow=get('follow'), repeat=get('repeat'), status=get('status');
 const tracks=['en','ja'].map(lang=>({
   lang, file:get(lang==='en'?'subtitle':'subtitle-ja'), toggle:get('show-'+lang),
-  section:get('track-'+lang), caption:get('caption-'+lang), list:get('lines-'+lang),
+  section:get('track-'+lang), caption:get('caption-'+lang), captionText:get('caption-'+lang).firstElementChild, list:get('lines-'+lang),
   cues:[], buttons:[], active:[], version:0
 }));
 let selection=null, url='', frame=0;
@@ -146,8 +182,9 @@ function clock(value) {
 }
 
 function syncTrack(track,time) {
-  const {cues,buttons,caption,list,section,toggle}=track;
-  const visible=toggle.checked && cues.length>0 && subtitlesAllowed();
+  const {cues,buttons,caption,captionText,list,section,toggle}=track;
+  const enabled=toggle.checked && cues.length>0;
+  const visible=enabled && subtitlesAllowed();
   section.hidden=!visible;
   const next=[];
   if(url) {
@@ -155,12 +192,14 @@ function syncTrack(track,time) {
       if(time<cues[i].end) next.push(i);
     }
   }
-  caption.hidden=!visible || next.length===0;
+  caption.hidden=!enabled;
+  captionText.hidden=!visible;
   if(next.length===track.active.length && next.every((i,n)=>i===track.active[n])) return;
   track.active.forEach(i=>buttons[i].classList.remove('active'));
   next.forEach(i=>buttons[i].classList.add('active'));
   track.active=next;
-  caption.textContent=next.map(i=>cues[i].text).join('\n');
+  captionText.textContent=next.map(i=>cues[i].text).join('\n');
+  caption.scrollTop=0;
   if(visible && follow.checked && next.length) {
     const rect=buttons[next[0]].getBoundingClientRect();
     const pane=list.getBoundingClientRect();
@@ -173,7 +212,7 @@ function sync() {
   get('quiz-style-label').hidden=!isQuizMode();
   get('subtitle-mode-hint').hidden=subtitlesAllowed();
   tracks.forEach(track=>syncTrack(track,player.currentTime-shift()));
-  get('captions').hidden=tracks.every(track=>track.section.hidden);
+  get('captions').hidden=tracks.every(track=>track.caption.hidden);
 }
 
 function selectCue(track,index) {
@@ -224,7 +263,7 @@ track.file.addEventListener('change',async ()=>{
   if(selection?.track===track) selectCue(null);
   track.cues=loaded;
   track.active=[];
-  track.caption.textContent='';
+  track.captionText.textContent='';
   track.buttons=loaded.map((cue,index)=>{
     const button=document.createElement('button');
     const time=document.createElement('time');
@@ -263,7 +302,10 @@ function setVideoLayout(showVideo) {
   get('playback').classList.toggle('audio-only',!showVideo);
 }
 
-player.addEventListener('loadedmetadata',()=>{setVideoLayout(player.videoWidth>0);});
+player.addEventListener('loadedmetadata',()=>{
+  setVideoLayout(player.videoWidth>0);
+  if(window.matchMedia('(max-width:600px)').matches) get('setup').open=false;
+});
 player.addEventListener('playing',()=>{ if(!frame) frame=requestAnimationFrame(animate); });
 player.addEventListener('pause',()=>{cancelAnimationFrame(frame);frame=0;sync();});
 for(const event of ['timeupdate','seeking','loadedmetadata','ended']) player.addEventListener(event,refresh);
