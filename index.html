@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>英語字幕プレーヤー</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101819;color:#edf5f1;font:16px/1.55 system-ui,sans-serif}
+main{max-width:1000px;margin:auto;padding:clamp(16px,4vw,40px)}
+h1{font-size:clamp(24px,5vw,38px);margin:0 0 18px;letter-spacing:-.035em}
+.panel{background:#192526;border:1px solid #344546;border-radius:18px;padding:clamp(14px,3vw,24px)}
+.files,.settings{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}
+.files label{display:grid;gap:7px;min-width:0;flex:1 1 240px;font-weight:650}
+input,select,button{font:inherit;color:inherit}
+input[type=file]{width:100%;font-size:14px;color:#c1d2cf}
+input::file-selector-button,select,input[type=number]{background:#293b3c;color:#edf5f1;border:1px solid #526766;border-radius:8px;padding:5px 8px}
+input[type=number]{width:85px}
+video{display:block;width:100%;height:clamp(150px,42vh,410px);background:#080d0d;border-radius:12px;color-scheme:dark}
+.playback{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-top:18px}
+.playback.audio-only video{height:48px}
+[hidden]{display:none!important}
+#tracks{display:grid;gap:16px;min-width:0}
+@media(min-width:820px){#tracks{grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}}
+.track h2{font-size:14px;margin:0 0 5px;color:#c1d2cf}
+.caption{white-space:pre-line;overflow-wrap:anywhere;font-weight:650;font-size:clamp(17px,3vw,24px);color:#a8f4d2;text-align:center}
+.caption[lang=ja]{color:#edf5f1;font-size:clamp(16px,2.6vw,21px)}
+.caption + .caption{margin-top:4px}
+#captions{min-height:2em}
+.settings{font-size:14px}
+.settings label{white-space:nowrap}
+#status{font-size:14px;color:#c1d2cf;margin:10px 0 0;overflow-wrap:anywhere}
+.lines{overflow:auto;height:clamp(175px,42vh,460px);border-top:1px solid #344546;overscroll-behavior:contain}
+.row{display:grid;grid-template-columns:5em 1fr;text-align:left;width:100%;gap:10px;background:transparent;border:0;border-bottom:1px solid #2b393a;padding:12px 8px;cursor:pointer}
+.row:hover,.row.chosen{background:#263a3a}
+.row.active{background:#184d3e;color:#d2ffeb;box-shadow:inset 3px 0 #79e6b8}
+.row span{white-space:pre-line;overflow-wrap:anywhere}
+time{color:#a9c3be;font-size:.82em;font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid #79e6b8;outline-offset:-2px}
+#quiz{border-top:1px solid #344546;padding-top:16px}
+#quiz h2{margin:10px 0;font-size:1.2rem}
+.quiz-controls,.quiz-nav{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.quiz-controls{margin-top:16px}
+.quiz-controls button,#quiz button{background:#293b3c;border:1px solid #526766;border-radius:8px;padding:7px 13px;cursor:pointer}
+#quiz button:disabled{opacity:.55;cursor:default}
+#quiz button.correct{background:#184d3e;border-color:#79e6b8;opacity:1}
+#quiz button.incorrect{background:#573131;border-color:#f3a5a5;opacity:1}
+#quiz-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px;margin:12px 0}
+#quiz-options button{text-align:left}
+#quiz-feedback,#quiz-position{color:#c1d2cf}
+#quiz-error{color:#f5c5a8}
+</style>
+<main>
+<h1>英語字幕プレーヤー</h1>
+<div class="panel">
+<div class="files">
+<label>動画・音声ファイル <input id="media" type="file" accept="video/*,audio/*,.mp4,.webm,.mp3"></label>
+<label>英語字幕（VTT・SRT） <input id="subtitle" type="file" accept=".vtt,.srt,text/vtt"></label>
+<label>日本語字幕（任意・VTT・SRT） <input id="subtitle-ja" type="file" accept=".vtt,.srt,text/vtt"></label>
+</div>
+
+<div class="settings">
+<label>速度 <select id="speed"><option value=".5">0.5×</option><option value=".75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label>
+<label>字幕のずれ <input id="offset" type="number" value="0" step="0.1" title="正の値で字幕を遅らせます"> 秒</label>
+<label><input id="follow" type="checkbox" checked> 自動スクロール</label>
+<label><input id="repeat" type="checkbox"> 字幕をリピート</label>
+</div>
+<div class="quiz-controls">
+<label>モード <select id="mode"><option value="watch">視聴</option><option value="quiz">クイズ</option></select></label>
+</div>
+<p id="status" role="status">同じ作品の動画（または音声）と字幕を選んでください。字幕を押すと、その位置から再生します。</p>
+<div id="playback" class="playback audio-only">
+<video id="player" controls playsinline preload="metadata" aria-label="動画・音声プレーヤー"></video>
+<div class="settings" id="subtitle-controls" aria-label="字幕表示設定">
+<label><input id="show-en" type="checkbox" checked> 英語字幕</label>
+<label><input id="show-ja" type="checkbox" checked> 日本語字幕</label>
+<label id="quiz-style-label" hidden>出題形式 <select id="quiz-style"><option value="listen">リスニング（解答前は字幕なし）</option><option value="read">字幕を見ながら解く</option></select></label>
+<span id="subtitle-mode-hint" hidden>リスニング中は解答後に字幕を表示できます。</span>
+</div>
+<div id="captions">
+<div class="caption" id="caption-en" lang="en" hidden></div>
+<div class="caption" id="caption-ja" lang="ja" hidden></div>
+</div>
+<section id="quiz" hidden aria-label="リスニングクイズ">
+<div class="quiz-nav">
+<label>作品 <select id="quiz-work"></select></label>
+<label>問題文 <select id="quiz-language"><option value="ja">日本語</option><option value="en">English</option></select></label>
+<label>出題順 <select id="quiz-order"><option value="ordered">順番通り</option><option value="random">ランダム</option></select></label>
+<label>問題CSV <input id="quiz-csv" type="file" accept=".csv,text/csv"></label>
+<label>問題 <select id="quiz-number"></select></label>
+<button id="quiz-prev" type="button">前の問題</button>
+<button id="quiz-next" type="button">次の問題</button>
+<span id="quiz-position"></span>
+</div>
+<h2 id="quiz-question"></h2>
+<button id="quiz-play" type="button">この場面を再生</button>
+<label id="quiz-review-label" hidden><input id="quiz-review" type="checkbox" checked> 解答後の字幕を表示</label>
+<div id="quiz-options"></div>
+<p id="quiz-feedback" role="status"></p>
+<p id="quiz-error" role="status" hidden></p>
+</section>
+<div id="tracks">
+<section class="track" id="track-en" hidden><h2>英語</h2><div class="lines" id="lines-en" aria-label="英語字幕一覧"></div></section>
+<section class="track" id="track-ja" hidden><h2>日本語</h2><div class="lines" id="lines-ja" aria-label="日本語字幕一覧"></div></section>
+</div>
+</div>
+</div>
+</main>
+<script>
+'use strict';
+const get = id => document.getElementById(id);
+const player=get('player'), media=get('media'), speed=get('speed'), offset=get('offset'),
+  follow=get('follow'), repeat=get('repeat'), status=get('status');
+const tracks=['en','ja'].map(lang=>({
+  lang, file:get(lang==='en'?'subtitle':'subtitle-ja'), toggle:get('show-'+lang),
+  section:get('track-'+lang), caption:get('caption-'+lang), list:get('lines-'+lang),
+  cues:[], buttons:[], active:[], version:0
+}));
+let selection=null, url='', frame=0;
+const shift = () => Number(offset.value) || 0;
+
+function seconds(value) {
+  return value.replace(',', '.').split(':').reduce((time, part) => time * 60 + Number(part), 0);
+}
+
+function parseSubtitles(input) {
+  const time = '(?:\\d{2,}:)?[0-5]\\d:[0-5]\\d[.,]\\d{3}';
+  const timing = new RegExp('^(' + time + ')\\s+-->\\s+(' + time + ')(?:\\s.*)?$');
+  const entities = {amp:'&',lt:'<',gt:'>',nbsp:' ',lrm:'\u200e',rlm:'\u200f'};
+  return input.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n').split(/\n[ \t]*\n/).flatMap(block => {
+    const rows = block.trim().split('\n');
+    if (/^(NOTE(?:\s|$)|STYLE$|REGION$|WEBVTT(?:\s|$))/.test(rows[0])) return [];
+    const index = rows.findIndex(row => timing.test(row.trim()));
+    if (index < 0 || index > 1) return [];
+    const [,start,end] = rows[index].trim().match(timing);
+    const text = rows.slice(index+1).join('\n').replace(/<[^>]*>/g,'')
+      .replace(/&(amp|lt|gt|nbsp|lrm|rlm);/g,(_,key)=>entities[key]).trim();
+    const cue = {start:seconds(start),end:seconds(end),text};
+    return text && cue.end > cue.start ? [cue] : [];
+  }).sort((a,b)=>a.start-b.start);
+}
+
+function clock(value) {
+  const whole = Math.floor(value);
+  const part = n => String(n).padStart(2,'0');
+  return part(Math.floor(whole/3600))+':'+part(Math.floor(whole/60)%60)+':'+part(whole%60);
+}
+
+function syncTrack(track,time) {
+  const {cues,buttons,caption,list,section,toggle}=track;
+  const visible=toggle.checked && cues.length>0 && subtitlesAllowed();
+  section.hidden=!visible;
+  const next=[];
+  if(url) {
+    for(let i=0;i<cues.length && cues[i].start<=time;i++) {
+      if(time<cues[i].end) next.push(i);
+    }
+  }
+  caption.hidden=!visible || next.length===0;
+  if(next.length===track.active.length && next.every((i,n)=>i===track.active[n])) return;
+  track.active.forEach(i=>buttons[i].classList.remove('active'));
+  next.forEach(i=>buttons[i].classList.add('active'));
+  track.active=next;
+  caption.textContent=next.map(i=>cues[i].text).join('\n');
+  if(visible && follow.checked && next.length) {
+    const rect=buttons[next[0]].getBoundingClientRect();
+    const pane=list.getBoundingClientRect();
+    if(rect.top<pane.top+15 || rect.bottom>pane.bottom-15)
+      list.scrollTop+=rect.top-pane.top-list.clientHeight/3;
+  }
+}
+
+function sync() {
+  get('quiz-style-label').hidden=!isQuizMode();
+  get('subtitle-mode-hint').hidden=subtitlesAllowed();
+  tracks.forEach(track=>syncTrack(track,player.currentTime-shift()));
+  get('captions').hidden=tracks.every(track=>track.section.hidden);
+}
+
+function selectCue(track,index) {
+  selection?.track.buttons[selection.index]?.classList.remove('chosen');
+  selection=track ? {track,index} : null;
+  selection?.track.buttons[index]?.classList.add('chosen');
+}
+
+function refresh() {
+  stopAtQuizEnd();
+  if(!isQuizMode() && repeat.checked && selection && !player.paused) {
+    const cue=selection.track.cues[selection.index];
+    const start=Math.max(0,cue.start+shift());
+    const end=Math.min(player.duration,cue.end+shift());
+    if(end>start && player.currentTime>=end) player.currentTime=start;
+  }
+  sync();
+}
+
+function animate() {
+  refresh();
+  frame=player.paused ? 0 : requestAnimationFrame(animate);
+}
+
+media.addEventListener('change',()=>{
+  const file=media.files[0];
+  if(!file) return;
+  player.pause();
+  quizEnd=null;
+  if(url) URL.revokeObjectURL(url);
+  url=URL.createObjectURL(file);
+  selectCue(null);
+  setVideoLayout(file.type.startsWith('video/') || /\.(mp4|webm|m4v|mov|ogv)$/i.test(file.name));
+  player.src=url;
+  player.playbackRate=Number(speed.value);
+  status.textContent=file.name+' を選択しました。';
+});
+for(const track of tracks) {
+track.toggle.addEventListener('change',sync);
+track.file.addEventListener('change',async ()=>{
+  const file=track.file.files[0];
+  if(!file) return;
+  const version=++track.version;
+  let loaded;
+  try { loaded=parseSubtitles(await file.text()); }
+  catch { loaded=[]; }
+  if(version!==track.version) return;
+  if(selection?.track===track) selectCue(null);
+  track.cues=loaded;
+  track.active=[];
+  track.caption.textContent='';
+  track.buttons=loaded.map((cue,index)=>{
+    const button=document.createElement('button');
+    const time=document.createElement('time');
+    const text=document.createElement('span');
+    button.className='row';
+    button.type='button';
+    time.textContent=clock(cue.start);
+    text.textContent=cue.text;
+    text.lang=track.lang;
+    button.append(time,text);
+    button.addEventListener('click',async ()=>{
+      selectCue(track,index);
+      if(!url || player.readyState<1) {
+        status.textContent='動画または音声を選び、読み込みが終わってから字幕を押してください。';
+        return;
+      }
+      const start=Math.max(0,cue.start+shift());
+      if(start>=player.duration || cue.end+shift()<=0) {
+        status.textContent='この字幕は再生範囲外です。ファイルの組み合わせや字幕のずれを確認してください。';
+        return;
+      }
+      player.currentTime=start;
+      try { await player.play(); }
+      catch { status.textContent='再生できませんでした。ファイル形式をご確認ください。'; }
+    });
+    return button;
+  });
+  track.list.replaceChildren(...track.buttons);
+  track.list.scrollTop=0;
+  status.textContent=loaded.length ? file.name+'（'+loaded.length+'件）' : '字幕を読み取れませんでした。VTTまたはSRTを確認してください。';
+  sync();
+});
+}
+function setVideoLayout(showVideo) {
+  get('playback').classList.toggle('with-video',showVideo);
+  get('playback').classList.toggle('audio-only',!showVideo);
+}
+
+player.addEventListener('loadedmetadata',()=>{setVideoLayout(player.videoWidth>0);});
+player.addEventListener('playing',()=>{ if(!frame) frame=requestAnimationFrame(animate); });
+player.addEventListener('pause',()=>{cancelAnimationFrame(frame);frame=0;sync();});
+for(const event of ['timeupdate','seeking','loadedmetadata','ended']) player.addEventListener(event,refresh);
+player.addEventListener('error',()=>{status.textContent='ファイルを読み込めませんでした。MP4・WebM・MP3など、ブラウザで再生できるファイルを選んでください。';});
+speed.addEventListener('change',()=>{player.playbackRate=Number(speed.value);});
+offset.addEventListener('input',sync);
+repeat.addEventListener('change',()=>{
+  if(repeat.checked && !selection) {
+    const track=tracks.find(t=>t.toggle.checked && t.active.length);
+    if(track) selectCue(track,track.active[0]);
+    else status.textContent='繰り返したい字幕を押してください。';
+  }
+});
+const builtInCsv="問題ID,作品,問題文_日本語,問題文_英語,選択肢A,選択肢B,選択肢C,選択肢D,正解,日本語解説,開始,終了,問題形式\nQ001,塔の上のラプンツェル,この場面の「worry」はどういう意味ですか？,What does “worry” mean in this clip?,休む,歌う,笑う,心配する,D,この場面の worry は「心配する」の意味。,00:00:58.058,00:01:02.646,語句の意味\nQ002,塔の上のラプンツェル,少女の名前は？,What is the girl's name?,アナ,ベル,ラプンツェル,アリエル,C,named Rapunzel は「ラプンツェルという名前の」。,00:01:02.729,00:01:05.732,内容理解\nQ003,塔の上のラプンツェル,物語の始まりに出てくるものは？,What does the story start with?,月,太陽,雲,星,B,starts with the sun は「太陽から始まる」。,00:01:06.441,00:01:09.444,内容理解\nQ004,塔の上のラプンツェル,この場面の「starts with」はどういう意味ですか？,What does “starts with” mean in this clip?,～に戻る,～で始まる,～で終わる,～を待つ,B,この場面の starts with は「～で始まる」の意味。,00:01:06.441,00:01:09.444,語句の意味\nQ005,塔の上のラプンツェル,空から何が落ちましたか？,What fell from the sky?,小さな石,白い羽,雨のしずく,太陽の光のしずく,D,a single drop of sunlight は「太陽の光のしずくが一滴」。,00:01:10.988,00:01:15.325,内容理解\nQ006,塔の上のラプンツェル,この場面の「single」はどういう意味ですか？,What does “single” mean in this clip?,とても大きい,いくつもの,とても古い,たった一つの,D,この場面の single は「たった一つの」の意味。,00:01:10.988,00:01:15.325,語句の意味\nQ007,塔の上のラプンツェル,生まれた花は何色でしたか？,What color was the flower?,赤色,金色,白色,青色,B,golden flower は「金色の花」。,00:01:15.409,00:01:21.081,内容理解\nQ008,塔の上のラプンツェル,この場面の「golden」はどういう意味ですか？,What does “golden” mean in this clip?,白い,重い,金色の,冷たい,C,この場面の golden は「金色の」の意味。,00:01:15.409,00:01:21.081,語句の意味\nQ009,塔の上のラプンツェル,花にはどんな力がありましたか？,What could the flower do?,病気やけがを治す,暗い場所を照らす,花を増やす,雨を降らせる,A,heal the sick and injured は「病人やけが人を治す」。,00:01:22.207,00:01:25.460,内容理解\nQ010,塔の上のラプンツェル,この場面の「heal」はどういう意味ですか？,What does “heal” mean in this clip?,隠す,見つける,治す,使う,C,この場面の heal は「治す」の意味。,00:01:22.207,00:01:25.460,語句の意味\nQ011,塔の上のラプンツェル,覚えておくように言われたのは誰ですか？,Who are we told to remember?,年を取った女性,若い男性,王様,小さな女の子,A,that old woman は「あのお年寄りの女性」。,00:01:26.962,00:01:30.465,内容理解\nQ012,塔の上のラプンツェル,この場面の「remember」はどういう意味ですか？,What does “remember” mean in this clip?,変える,渡す,覚えておく,忘れる,C,この場面の remember は「覚えておく」の意味。,00:01:26.962,00:01:30.465,語句の意味\nQ013,塔の上のラプンツェル,この場面の「important」はどういう意味ですか？,What does “important” mean in this clip?,危険な,静かな,退屈な,重要な,D,この場面の important は「重要な」の意味。,00:01:30.549,00:01:31.717,語句の意味\nQ014,塔の上のラプンツェル,王国を治めていたのは誰ですか？,Who ruled the kingdom?,魔法使いとその弟子,王と王妃,王子と姫,兵士と商人,B,king and queen は「王と王妃」。,00:01:38.724,00:01:41.852,内容理解\nQ015,塔の上のラプンツェル,この場面の「kingdom」はどういう意味ですか？,What does “kingdom” mean in this clip?,通路,教室,畑,王国,D,この場面の kingdom は「王国」の意味。,00:01:38.724,00:01:41.852,語句の意味\nQ016,塔の上のラプンツェル,王妃はもうすぐ何をするところでしたか？,What was the queen about to do?,旅に出る,赤ちゃんを産む,城を出る,手紙を書く,B,be about to have a baby は「もうすぐ赤ちゃんを産む」。,00:01:42.769,00:01:45.480,内容理解\nQ017,塔の上のラプンツェル,この場面の「queen」はどういう意味ですか？,What does “queen” mean in this clip?,兵士,先生,王妃,看護師,C,この場面の queen は「王妃」の意味。,00:01:42.769,00:01:45.480,語句の意味\nQ018,塔の上のラプンツェル,王妃の体調はどうなりましたか？,What happened to the queen's health?,ひどく具合が悪くなった,おなかがすいた,元気になった,眠くなった,A,got sick は「具合が悪くなった」。really sick で程度を強めている。,00:01:46.148,00:01:49.359,内容理解\nQ019,塔の上のラプンツェル,この場面の「got sick」はどういう意味ですか？,What does “got sick” mean in this clip?,眠くなった,空腹になった,病気になった,元気になった,C,この場面の got sick は「病気になった」の意味。,00:01:46.148,00:01:47.274,語句の意味\nQ020,塔の上のラプンツェル,この場面で「奇跡」として挙げられたものは？,What is described as a miracle in this case?,銀色の鍵,魔法の鏡,小さな船,魔法の金色の花,D,a magic golden flower は「魔法の金色の花」。,00:01:50.068,00:01:58.201,内容理解\nQ021,塔の上のラプンツェル,この場面の「running out of time」はどういう意味ですか？,What does “running out of time” mean in this clip?,時間を測っている,予定より早く着いている,残り時間が少なくなっている,時間を忘れている,C,この場面の running out of time は「残り時間が少なくなっている」の意味。,00:01:50.068,00:01:51.361,語句の意味\nQ022,塔の上のラプンツェル,ゴーテルは何のために力を使いましたか？,Why did Mother Gothel use the power?,友人を助けるため,王国を守るため,子どもを捜すため,自分が若くいるため,D,keep herself young は「自分を若いままにしておく」。,00:02:03.624,00:02:09.713,内容理解\nQ023,塔の上のラプンツェル,女性は何をすればよかったですか？,What did the woman have to do?,手紙を書く,特別な歌を歌う,花に水をやる,窓を開ける,B,sing a special song は「特別な歌を歌う」。,00:02:09.796,00:02:13.258,内容理解\nQ024,塔の上のラプンツェル,この場面の「special」はどういう意味ですか？,What does “special” mean in this clip?,特別な,普通の,同じ,間違った,A,この場面の special は「特別な」の意味。,00:02:09.796,00:02:13.258,語句の意味\nQ025,塔の上のラプンツェル,花の魔法は誰を治しましたか？,Who did the flower's magic heal?,兵士,ゴーテル,王妃,王,C,healed the queen は「王妃を治した」。,00:02:55.300,00:02:59.971,内容理解\nQ026,塔の上のラプンツェル,生まれた姫の髪は何色でしたか？,What color was the baby princess's hair?,赤色,黒色,金色,茶色,C,golden hair は「金色の髪」。,00:03:00.889,00:03:05.811,内容理解\nQ027,塔の上のラプンツェル,この場面の「healthy」はどういう意味ですか？,What does “healthy” mean in this clip?,退屈な,空腹の,健康な,おびえた,C,この場面の healthy は「健康な」の意味。,00:03:00.889,00:03:05.811,語句の意味\nQ028,塔の上のラプンツェル,王と王妃は空に何を飛ばしましたか？,What did the king and queen send into the sky?,ランタン,紙飛行機,風船,凧,A,flying lantern は「空に飛ばすランタン」。,00:03:19.491,00:03:24.246,内容理解\nQ029,塔の上のラプンツェル,この場面の「celebrate」はどういう意味ですか？,What does “celebrate” mean in this clip?,探す,断る,隠す,祝う,D,この場面の celebrate は「祝う」の意味。,00:03:19.491,00:03:20.742,語句の意味\nQ030,塔の上のラプンツェル,ゴーテルは城から誰を連れ去りましたか？,Who did Gothel take from the castle?,子ども,兵士,王妃,料理人,A,stole the child は「子どもをさらった」。,00:03:57.946,00:04:00.407,内容理解\nQ031,塔の上のラプンツェル,人々は姫を見つけられましたか？,Did the people find the princess?,森で見つけた,町で見つけた,見つけられなかった,城で見つけた,C,could not find は「見つけられなかった」。,00:04:04.619,00:04:08.248,内容理解\nQ032,塔の上のラプンツェル,この場面の「searched」はどういう意味ですか？,What does “searched” mean in this clip?,数えた,守った,捜した,描いた,C,この場面の searched は「捜した」の意味。,00:04:04.619,00:04:08.248,語句の意味\nQ033,塔の上のラプンツェル,ゴーテルが子どもを育てた塔はどこにありましたか？,Where was the tower in which Gothel raised the child?,海辺,川のそば,町の中心,森の奥,D,deep within the forest は「森の奥深く」。,00:04:08.331,00:04:13.086,内容理解\nQ034,塔の上のラプンツェル,この場面の「hidden」はどういう意味ですか？,What does “hidden” mean in this clip?,壊れた,動いた,隠れた,輝いた,C,この場面の hidden は「隠れた」の意味。,00:04:08.331,00:04:11.418,語句の意味\nQ035,塔の上のラプンツェル,話し手はどこへ行けない理由を尋ねていますか？,Where does the speaker ask why she cannot go?,屋根の上,外,地下室,台所,B,go outside は「外へ出る」。,00:04:28.894,00:04:31.313,内容理解\nQ036,塔の上のラプンツェル,この場面の「outside」はどういう意味ですか？,What does “outside” mean in this clip?,下へ,上へ,外へ,中へ,C,この場面の outside は「外へ」の意味。,00:04:28.894,00:04:31.313,語句の意味\nQ037,塔の上のラプンツェル,外の世界はどんな場所だと言っていますか？,How does the speaker describe the outside world?,危険な場所,静かな場所,退屈な場所,楽しい場所,A,a dangerous place は「危険な場所」。,00:04:31.396,00:04:34.065,内容理解\nQ038,塔の上のラプンツェル,この場面の「dangerous」はどういう意味ですか？,What does “dangerous” mean in this clip?,安全な,便利な,危険な,静かな,C,この場面の dangerous は「危険な」の意味。,00:04:31.396,00:04:34.065,語句の意味\nQ039,塔の上のラプンツェル,話し手が「ここにいなさい」と言う理由は？,Why does the speaker say to stay here?,ここなら安全だから,ここが暖かいから,外がうるさいから,外が暗いから,A,where you're safe は「あなたが安全でいられる場所」。,00:04:36.735,00:04:39.821,内容理解\nQ040,塔の上のラプンツェル,この場面の「safe」はどういう意味ですか？,What does “safe” mean in this clip?,重い,安全な,忙しい,危険な,B,この場面の safe は「安全な」の意味。,00:04:36.735,00:04:39.821,語句の意味\nQ041,塔の上のラプンツェル,王と王妃は毎年いつランタンを飛ばしましたか？,When did the king and queen release lanterns every year?,新年,夏の初日,姫の誕生日,王の誕生日,C,\"each year, on her birthday は「毎年、彼女の誕生日に」。\",00:04:54.127,00:04:59.216,内容理解\nQ042,塔の上のラプンツェル,この場面の「each year」はどういう意味ですか？,What does “each year” mean in this clip?,毎月,毎年,毎週,毎日,B,この場面の each year は「毎年」の意味。,00:04:54.127,00:04:55.712,語句の意味\nQ043,塔の上のラプンツェル,誰がここには隠れていないと思っていますか？,Who does the speaker think is not hiding here?,マキシマス,パスカル,フリン,ゴーテル,B,Pascal's not hiding out here は「パスカルはここに隠れていない」。,00:05:26.910,00:05:30.455,内容理解\nQ044,塔の上のラプンツェル,この場面の「hiding」はどういう意味ですか？,What does “hiding” mean in this clip?,走っている,歌っている,隠れている,眠っている,C,この場面の hiding は「隠れている」の意味。,00:05:26.910,00:05:30.455,語句の意味\nQ045,塔の上のラプンツェル,話し手は何が欲しいと言っていますか？,What does the speaker say he wants?,城,王冠,馬,船,A,I want a castle. は「城が欲しい」。,00:08:45.358,00:08:50.989,内容理解\nQ046,塔の上のラプンツェル,この場面の「castle」はどういう意味ですか？,What does “castle” mean in this clip?,城,農場,店,船,A,この場面の castle は「城」の意味。,00:08:45.358,00:08:50.989,語句の意味\nQ047,塔の上のラプンツェル,何時だと言っていますか？,What time does the speaker say it is?,午後7時,午前7時,午前8時,午後8時,C,8:00 in the morning は「午前8時」。,00:09:18.558,00:09:21.436,内容理解\nQ048,塔の上のラプンツェル,この場面の「morning」はどういう意味ですか？,What does “morning” mean in this clip?,朝,夕方,昼,夜,A,この場面の morning は「朝」の意味。,00:09:18.558,00:09:21.436,語句の意味\nQ049,塔の上のラプンツェル,何を下ろすよう求めていますか？,What is the speaker asking to be let down?,はしご,旗,髪,ロープ,C,let down your hair は「髪を下ろして」。,00:09:35.909,00:09:37.660,内容理解\nQ050,塔の上のラプンツェル,この場面の「see」はどういう意味ですか？,What does “see” mean in this clip?,運ぶ,見る,聞く,たたく,B,この場面の see は「見る」の意味。,00:09:41.164,00:09:44.167,語句の意味\nQ051,塔の上のラプンツェル,ラプンツェルは誰に「今行く」と言っていますか？,To whom does Rapunzel say she is coming?,フリン,お母さん,パスカル,お父さん,B,再生区間で聞き取れる答えは「お母さん」。,00:09:51.341,00:09:52.884,内容理解\nQ052,塔の上のラプンツェル,この場面の「tomorrow」はどういう意味ですか？,What does “tomorrow” mean in this clip?,明日,来週,きのう,今日,A,この場面の tomorrow は「明日」の意味。,00:10:39.722,00:10:43.017,語句の意味\nQ053,塔の上のラプンツェル,ラプンツェルは何を見るように言われますか？,What is Rapunzel told to look in?,窓,箱,かばん,鏡,D,look in that mirror は「その鏡をのぞいて」。,00:10:43.101,00:10:44.686,内容理解\nQ054,塔の上のラプンツェル,この場面の「mirror」はどういう意味ですか？,What does “mirror” mean in this clip?,机,窓,時計,鏡,D,この場面の mirror は「鏡」の意味。,00:10:43.101,00:10:44.686,語句の意味\nQ055,塔の上のラプンツェル,ゴーテルはラプンツェルに何を頼みますか？,What does Gothel ask Rapunzel to do?,歌を歌う,本を読む,水を持ってくる,髪をとかす,A,Would you sing for me? は「私のために歌ってくれる？」。,00:11:03.371,00:11:06.374,内容理解\nQ056,塔の上のラプンツェル,この場面の「sing」はどういう意味ですか？,What does “sing” mean in this clip?,踊る,歌う,話す,描く,B,この場面の sing は「歌う」の意味。,00:11:03.371,00:11:06.374,語句の意味\nQ057,塔の上のラプンツェル,明日が大事な日は、誰の誕生日だからですか？,Whose birthday makes tomorrow a big day?,王,王妃,ラプンツェル,ゴーテル,C,ラプンツェル自身が my birthday と言っている。,00:11:26.144,00:11:31.858,内容理解\nQ058,塔の上のラプンツェル,この場面の「birthday」はどういう意味ですか？,What does “birthday” mean in this clip?,誕生日,記念品,夕食,休日,A,この場面の birthday は「誕生日」の意味。,00:11:29.105,00:11:31.858,語句の意味\nQ059,塔の上のラプンツェル,ラプンツェルは何歳になりますか？,How old is Rapunzel turning?,18歳,16歳,19歳,17歳,A,I'm turning 18. は「私は18歳になる」。,00:11:43.494,00:11:48.416,内容理解\nQ060,塔の上のラプンツェル,この場面の「turning 18」はどういう意味ですか？,What does “turning 18” mean in this clip?,18分待つ,18歳になる,18時に戻る,18回まわる,B,この場面の turning 18 は「18歳になる」の意味。,00:11:43.494,00:11:48.416,語句の意味\nQ061,塔の上のラプンツェル,ラプンツェルは何を見に連れていってほしいのですか？,What does Rapunzel hope to go and see?,浮かぶ光,お城,森の動物,花畑,A,floating lights は「浮かぶ光」。,00:12:14.776,00:12:18.488,内容理解\nQ062,塔の上のラプンツェル,この場面の「floating」はどういう意味ですか？,What does “floating” mean in this clip?,沈んでいる,浮かんでいる,凍っている,消えている,B,この場面の floating は「浮かんでいる」の意味。,00:12:14.776,00:12:18.488,語句の意味\nQ063,塔の上のラプンツェル,ラプンツェルによると、光はいつ現れますか？,When does Rapunzel say the lights appear?,毎年、自分の誕生日,新年,毎月の初日,毎晩,A,every year on my birthday は「毎年、自分の誕生日に」。,00:12:27.664,00:12:33.544,内容理解\nQ064,塔の上のラプンツェル,この場面の「only」はどういう意味ですか？,What does “only” mean in this clip?,いくつか,～だけ,～も,ときどき,B,この場面の only は「～だけ」の意味。,00:12:31.584,00:12:33.544,語句の意味\nQ065,塔の上のラプンツェル,話し手は窓から見るほかに、どう見たいのですか？,How does the speaker want to see the lights besides looking from the window?,鏡を通して,絵の中で,写真で,その場に行って直接,D,in person は「実際にその場で、直接」。,00:12:41.719,00:12:45.139,内容理解\nQ066,塔の上のラプンツェル,この場面の「window」はどういう意味ですか？,What does “window” mean in this clip?,天井,庭,窓,鏡,C,この場面の window は「窓」の意味。,00:12:41.719,00:12:45.139,語句の意味\nQ067,塔の上のラプンツェル,もう頼まないように言われたのは、何をすることですか？,What is she told never to ask to do again?,歌を歌うこと,窓を開けること,友達を呼ぶこと,塔の外へ出ること,D,leave this tower は「この塔から出る」。,00:14:50.390,00:14:54.352,内容理解\nQ068,塔の上のラプンツェル,この場面の「again」はどういう意味ですか？,What does “again” mean in this clip?,すぐに,もう一度,ときどき,まだ,B,この場面の again は「もう一度」の意味。,00:14:50.390,00:14:54.352,語句の意味\nQ069,塔の上のラプンツェル,この場面の「in a bit」はどういう意味ですか？,What does “in a bit” mean in this clip?,きのう,毎朝,少ししたら,ずっと前に,C,この場面の in a bit は「少ししたら」の意味。,00:15:22.255,00:15:25.383,語句の意味\nQ070,塔の上のラプンツェル,話し手は、顔のどこが正しく描かれていないと言っていますか？,Which part of his face does the speaker say they got wrong?,耳,目,鼻,口,C,get my nose right は「私の鼻を正しく表す」。,00:16:00.126,00:16:02.295,内容理解\nQ071,塔の上のラプンツェル,この場面の「first」はどういう意味ですか？,What does “first” mean in this clip?,一緒に,あとで,先に,最後に,C,この場面の first は「先に」の意味。,00:16:26.611,00:16:28.112,語句の意味\nQ072,塔の上のラプンツェル,この場面の「my hands are full」はどういう意味ですか？,What does “my hands are full” mean in this clip?,手が汚れている,手が冷たい,手がふさがっている,手が痛い,C,この場面の my hands are full は「手がふさがっている」の意味。,00:16:48.549,00:16:51.302,語句の意味\nQ073,塔の上のラプンツェル,ラプンツェルはどこに人がいると言っていますか？,Where does Rapunzel say there is a person?,ベッドの下,庭,台所,物入れの中,D,in my closet は「私の物入れの中に」。,00:21:08.392,00:21:11.729,内容理解\nQ074,塔の上のラプンツェル,この場面の「closet」はどういう意味ですか？,What does “closet” mean in this clip?,台所,屋根,物入れ,玄関,C,この場面の closet は「物入れ」の意味。,00:21:08.392,00:21:11.729,語句の意味\nQ075,塔の上のラプンツェル,話し手はどんな調理道具に言及していますか？,Which cooking tool does the speaker mention?,おたま,やかん,フライパン,包丁,C,frying pan は「フライパン」。,00:21:24.825,00:21:28.370,内容理解\nQ076,塔の上のラプンツェル,この場面の「surprise」はどういう意味ですか？,What does “surprise” mean in this clip?,心配,失敗,驚き,約束,C,この場面の surprise は「驚き」の意味。,00:22:16.794,00:22:18.838,語句の意味\nQ077,塔の上のラプンツェル,ゴーテルは夕食に何を作るつもりですか？,What is Gothel going to make for dinner?,パン,サラダ,ケーキ,スープ,D,make hazelnut soup for dinner は「夕食にヘーゼルナッツのスープを作る」。,00:22:27.555,00:22:30.975,内容理解\nQ078,塔の上のラプンツェル,この場面の「dinner」はどういう意味ですか？,What does “dinner” mean in this clip?,朝食,おやつ,昼食,夕食,D,この場面の dinner は「夕食」の意味。,00:22:27.555,00:22:30.975,語句の意味\nQ079,塔の上のラプンツェル,ゴーテルはラプンツェルがどこから出ることを禁じていますか？,What place does Gothel say Rapunzel must not leave?,城,村,塔,森,C,You are not leaving this tower. は「この塔から出てはだめ」。,00:23:08.304,00:23:12.766,内容理解\nQ080,塔の上のラプンツェル,ラプンツェルが欲しい絵の具は何から作られますか？,What is the paint Rapunzel wants made from?,青い石,白い貝殻,赤い花,木の葉,B,made from the white shells は「白い貝殻から作られた」。,00:23:43.714,00:23:49.386,内容理解\nQ081,塔の上のラプンツェル,この場面の「shells」はどういう意味ですか？,What does “shells” mean in this clip?,花びら,木の実,葉,貝殻,D,この場面の shells は「貝殻」の意味。,00:23:46.008,00:23:49.386,語句の意味\nQ082,塔の上のラプンツェル,その旅にはどれくらいかかると言われますか？,How long does Gothel say the trip takes?,ほぼ3日,ほぼ1週間,ほぼ1日,ほぼ1か月,A,almost three days' time は「ほぼ3日」。,00:23:49.470,00:23:54.600,内容理解\nQ083,塔の上のラプンツェル,ゴーテルはいつ戻ると言いますか？,When does Gothel say she will be back?,翌朝,3時間後,3日後,1週間後,C,I'll be back in three days' time. は「3日後に戻る」。,00:24:17.957,00:24:20.417,内容理解\nQ084,塔の上のラプンツェル,この場面の「in three days' time」はどういう意味ですか？,What does “in three days' time” mean in this clip?,3週間後に,3日前に,3日後に,3時間後に,C,この場面の in three days' time は「3日後に」の意味。,00:24:17.957,00:24:20.417,語句の意味\nQ085,塔の上のラプンツェル,この場面の「afraid of」はどういう意味ですか？,What does “afraid of” mean in this clip?,～を怖がっている,～を信じている,～を知っている,～を待っている,A,この場面の afraid of は「～を怖がっている」の意味。,00:25:46.962,00:25:51.925,語句の意味\nQ086,塔の上のラプンツェル,話し手は、相手が誰かという質問に加え、何を尋ねますか？,\"Besides asking who he is, what does the speaker ask?\",何を食べたか,どうやって自分を見つけたか,いつ帰るか,どこに住んでいるか,B,How did you find me? は「どうやって私を見つけたの？」。,00:26:01.894,00:26:05.814,内容理解\nQ087,塔の上のラプンツェル,男性は何と名乗りますか？,What name does the man give?,マキシマス,フリン・ライダー,パスカル,ユージーン・フィッツハーバート,B,The name's Flynn Rider. は「名前はフリン・ライダーだ」。,00:26:27.377,00:26:30.172,内容理解\nQ088,塔の上のラプンツェル,かばんをどうしたと答えていますか？,What does the speaker say she did with the bag?,隠した,売った,捨てた,返した,A,I've hidden it. は「それを隠した」。,00:26:49.399,00:26:54.196,内容理解\nQ089,塔の上のラプンツェル,この場面の「satchel」はどういう意味ですか？,What does “satchel” mean in this clip?,肩掛けかばん,靴,上着,帽子,A,この場面の satchel は「肩掛けかばん」の意味。,00:26:49.399,00:26:50.734,語句の意味\nQ090,塔の上のラプンツェル,フリンは、追われているときに何を見て登ったと言いますか？,What does Flynn say he saw and climbed while being chased?,城壁,塔,山,木,B,\"I saw a tower, I climbed it. は「塔を見つけて登った」。\",00:27:28.897,00:27:31.525,内容理解\nQ091,塔の上のラプンツェル,この場面の「telling the truth」はどういう意味ですか？,What does “telling the truth” mean in this clip?,冗談を言っている,本当のことを言っている,質問している,歌を歌っている,B,この場面の telling the truth は「本当のことを言っている」の意味。,00:27:50.961,00:27:53.463,語句の意味\nQ092,塔の上のラプンツェル,ラプンツェルが見ていた光の正体は何ですか？,What were the lights Rapunzel saw?,花火,ランタン,星,ろうそく,B,lanterns は「ランタン」。光が星ではなかったとラプンツェルが言っている。,00:28:09.062,00:28:16.111,内容理解\nQ093,塔の上のラプンツェル,この場面の「lanterns」はどういう意味ですか？,What does “lanterns” mean in this clip?,鏡,星,ランタン,風船,C,この場面の lanterns は「ランタン」の意味。,00:28:12.649,00:28:16.111,語句の意味\nQ094,塔の上のラプンツェル,ランタンで夜空を照らすのはいつですか？,When will the lanterns light the night sky?,今日の昼,明日の夕方,明後日の朝,今朝,B,tomorrow evening は「明日の夕方」。,00:28:17.196,00:28:23.577,内容理解\nQ095,塔の上のラプンツェル,この場面の「evening」はどういう意味ですか？,What does “evening” mean in this clip?,夕方,深夜,正午,朝,A,この場面の evening は「夕方」の意味。,00:28:17.196,00:28:19.531,語句の意味\nQ096,塔の上のラプンツェル,案内と送り届けることを条件に、何を返すと言っていますか？,What does Rapunzel say she will return if Flynn takes her there and brings her home?,帽子,剣,肩掛けかばん,鍵,C,return your satchel は「あなたの肩掛けかばんを返す」。,00:28:23.660,00:28:33.253,内容理解\nQ097,塔の上のラプンツェル,ラプンツェルは自分の約束について何と言いますか？,What does Rapunzel say about her promises?,人に話さない,よく変更する,決して破らない,すぐ忘れる,C,\"never, ever break that promise は「その約束を絶対に破らない」。\",00:29:27.224,00:29:32.145,内容理解\nQ098,塔の上のラプンツェル,この場面の「break that promise」はどういう意味ですか？,What does “break that promise” mean in this clip?,その約束を守る,その約束を破る,その約束を書き留める,その約束を繰り返す,B,この場面の break that promise は「その約束を破る」の意味。,00:29:27.224,00:29:32.145,語句の意味\nQ099,塔の上のラプンツェル,母はどう感じるだろうと言っていますか？,How does she think her mother would feel?,大喜びする,落ち着く,退屈する,激しく怒る,D,再生区間で聞き取れる答えは「激しく怒る」。,00:32:11.221,00:32:13.140,内容理解\nQ100,塔の上のラプンツェル,ラプンツェルは何をすると言いますか？,What does Rapunzel say she is going to do?,引き返す,ここで待つ,木に登る,走り続ける,A,再生区間で聞き取れる答えは「引き返す」。,00:32:23.024,00:32:26.236,内容理解\nQ101,塔の上のラプンツェル,フリンは、この経験を何の一部だと言いますか？,What does Flynn say this is part of?,食事を作ること,歌を覚えること,仕事を探すこと,成長すること,D,再生区間で聞き取れる答えは「成長すること」。,00:33:00.604,00:33:03.690,内容理解\nQ102,塔の上のラプンツェル,ラプンツェルは母の気持ちをどう予想しますか？,How does Rapunzel think her mother would feel?,退屈する,ひどく傷つく,安心する,喜ぶ,B,再生区間で聞き取れる答えは「ひどく傷つく」。,00:33:29.382,00:33:32.302,内容理解\nQ103,塔の上のラプンツェル,話し手は何を取り戻すと言っていますか？,What does the speaker say he gets back?,肩掛けかばん,帽子,剣,靴,A,再生区間で聞き取れる答えは「肩掛けかばん」。,00:33:47.484,00:33:48.818,内容理解\nQ104,塔の上のラプンツェル,二人はどんな関係で別れると言いますか？,As what does he say they will part ways?,敵同士,兄妹,意外な友人同士,仕事仲間,C,再生区間で聞き取れる答えは「意外な友人同士」。,00:33:52.239,00:33:55.408,内容理解\nQ105,塔の上のラプンツェル,相手は何を嗅ぎ取れるかもしれないと言いますか？,What does he think it can smell?,香水,食べ物,煙,恐怖,D,再生区間で聞き取れる答えは「恐怖」。,00:34:14.344,00:34:17.138,内容理解\nQ106,塔の上のラプンツェル,謝った人は自分をどう説明しますか？,How does the apologizing speaker describe himself?,少し眠い,少しおびえている,とても落ち着いている,かなりお腹がすいている,B,再生区間で聞き取れる答えは「少しおびえている」。,00:34:18.890,00:34:22.978,内容理解\nQ107,塔の上のラプンツェル,見つけた場所の名前は？,What is the name of the place he points out?,白い馬亭,スナグリー・ダックリング,黄金の塔,森の城,B,再生区間で聞き取れる答えは「スナグリー・ダックリング」。,00:36:55.922,00:36:59.551,内容理解\nQ108,塔の上のラプンツェル,どんな色のにおいがすると言いますか？,What color does he say it smells like?,赤,茶色,青,黄色,B,再生区間で聞き取れる答えは「茶色」。,00:37:30.165,00:37:32.167,内容理解\nQ109,塔の上のラプンツェル,何がたくさんあると言っていますか？,What does the speaker say there is a lot of?,花,服,髪,水,C,再生区間で聞き取れる答えは「髪」。,00:37:34.419,00:37:36.796,内容理解\nQ110,塔の上のラプンツェル,血が付いていると言われたのはどこですか？,Where does the speaker say there is blood?,眉毛,手袋,口ひげ,靴,C,再生区間で聞き取れる答えは「口ひげ」。,00:37:39.299,00:37:42.177,内容理解\nQ111,塔の上のラプンツェル,その店は何つ星だと言っていますか？,How many stars does he say the place has?,2つ,5つ,1つ,3つ,B,再生区間で聞き取れる答えは「5つ」。,00:37:49.934,00:37:52.854,内容理解\nQ112,塔の上のラプンツェル,報奨金で何を買うと言いますか？,What does he plan to buy with the reward?,新しいフック,新しい鍋,新しい靴,新しい帽子,A,再生区間で聞き取れる答えは「新しいフック」。,00:38:08.036,00:38:11.414,内容理解\nQ113,塔の上のラプンツェル,後半の話し手は、相手にどうしてほしいのですか？,What does the second speaker ask them to do?,彼を追いかける,彼を笑わせる,彼を起こす,彼を放っておく,D,再生区間で聞き取れる答えは「彼を放っておく」。,00:38:17.378,00:38:20.298,内容理解\nQ114,塔の上のラプンツェル,ラプンツェルは誰を返してほしいのですか？,Whom does Rapunzel ask them to give back?,王様,料理人,兵士,案内役,D,再生区間で聞き取れる答えは「案内役」。,00:38:21.633,00:38:25.136,内容理解\nQ115,塔の上のラプンツェル,どこを狙わないでと言っていますか？,What part of his face does he ask them to avoid?,鼻,額,あご,耳,A,再生区間で聞き取れる答えは「鼻」。,00:38:33.520,00:38:35.063,内容理解\nQ116,塔の上のラプンツェル,案内役に何を見せてもらいたいのですか？,What does she need her guide to take her to see?,滝,ランタン,花火,お城,B,再生区間で聞き取れる答えは「ランタン」。,00:38:42.654,00:38:46.574,内容理解\nQ117,塔の上のラプンツェル,相手に何を持ったことがあるかと尋ねますか？,What does she ask if they have ever had?,お金,馬,友達,夢,D,再生区間で聞き取れる答えは「夢」。,00:38:49.661,00:38:54.499,内容理解\nQ118,塔の上のラプンツェル,話し手は、捜している人物がどこにいると考えていますか？,Where does the speaker think the man is?,この中のどこか,すでに遠くにいる,王国の外,川の向こう,A,再生区間で聞き取れる答えは「この中のどこか」。,00:42:36.846,00:42:38.973,内容理解\nQ119,塔の上のラプンツェル,相手は誰と話していたと言っていますか？,Whom does the speaker say he was talking to?,誰にも,兵士全員,あなた,彼女,D,再生区間で聞き取れる答えは「彼女」。,00:43:02.747,00:43:04.540,内容理解\nQ120,塔の上のラプンツェル,誰の姿も見当たらないと報告しますか？,Who does the speaker report there is no sign of?,ラプンツェル,パスカル,ゴーテル,ライダー,D,再生区間で聞き取れる答えは「ライダー」。,00:43:16.844,00:43:19.055,内容理解\nQ121,塔の上のラプンツェル,何を見つけて仲間に声をかけますか？,What does he find before calling the men?,宝箱,通路,鍵,ボート,B,再生区間で聞き取れる答えは「通路」。,00:43:42.703,00:43:45.414,内容理解\nQ122,塔の上のラプンツェル,フリンについて何を尋ねていますか？,What does she ask Flynn about himself?,いつ来たか,何が得意か,何歳か,どこの出身か,D,再生区間で聞き取れる答えは「どこの出身か」。,00:44:41.804,00:44:45.141,内容理解\nQ123,塔の上のラプンツェル,話し手は、どれくらい待ったと言っていますか？,How long does the speaker say he waited?,1週間だけ,きっかり1日,ほんの一瞬,長い間,D,再生区間で聞き取れる答えは「長い間」。,00:45:59.882,00:46:02.343,内容理解\nQ124,塔の上のラプンツェル,話し手は、今していることをどう表現しますか？,How does the speaker describe what he is doing?,今までで一番退屈,いつもと同じ,今までで一番簡単,今までで一番奇妙,D,再生区間で聞き取れる答えは「今までで一番奇妙」。,00:46:23.447,00:46:27.952,内容理解\nQ125,塔の上のラプンツェル,この場面の「strangest」はどういう意味ですか？,What does “strangest” mean in this clip?,最も新しい,最も簡単な,最も奇妙な,最も短い,C,この場面の strangest は「最も奇妙な」の意味。,00:46:23.447,00:46:27.952,語句の意味\nQ126,塔の上のラプンツェル,3回のうち何回を提案していますか？,How many out of three does he suggest?,1回,0回,2回,3回,C,再生区間で聞き取れる答えは「2回」。,00:46:33.207,00:46:34.959,内容理解\nQ127,塔の上のラプンツェル,話し手は何ができないと言いますか？,What does the speaker say he cannot do?,走れない,何も聞こえない,立てない,何も見えない,D,再生区間で聞き取れる答えは「何も見えない」。,00:48:31.951,00:48:35.246,内容理解\nQ128,塔の上のラプンツェル,魔法の髪はいつ光りますか？,When does her magic hair glow?,歌うとき,走るとき,笑うとき,眠るとき,A,再生区間で聞き取れる答えは「歌うとき」。,00:49:28.132,00:49:30.926,内容理解\nQ129,塔の上のラプンツェル,この場面の「glows」はどういう意味ですか？,What does “glows” mean in this clip?,光る,燃える,消える,伸びる,A,この場面の glows は「光る」の意味。,00:49:28.132,00:49:30.926,語句の意味\nQ130,塔の上のラプンツェル,その髪について何を尋ねていますか？,What does the speaker ask about her hair?,誰が切ったか,何色か,なぜ光るか,なぜ長いか,C,再生区間で聞き取れる答えは「なぜ光るか」。,00:50:42.581,00:50:44.208,内容理解\nQ131,塔の上のラプンツェル,髪の力について何と言っていますか？,What does she say about the hair's power?,もう光らない,光ることしかできない,光る以外の力もある,自分にも分からない,C,再生区間で聞き取れる答えは「光る以外の力もある」。,00:50:47.002,00:50:49.171,内容理解\nQ132,塔の上のラプンツェル,王国で何を取り戻すと言いますか？,What do they plan to get back at the kingdom?,かばん,宝石箱,王冠,馬,C,再生区間で聞き取れる答えは「王冠」。,00:51:22.246,00:51:26.250,内容理解\nQ133,塔の上のラプンツェル,相手のふるまいを何にたとえていますか？,What does she compare their behavior to?,魚,ウサギ,鳥,野犬,D,再生区間で聞き取れる答えは「野犬」。,00:51:30.713,00:51:33.632,内容理解\nQ134,塔の上のラプンツェル,提示しようとした品には何クラウンの価値があると言いますか？,How many crowns does she say her offer is worth?,100,\"2,000\",\"1,000\",500,C,\"再生区間で聞き取れる答えは「1,000」。\",00:51:50.941,00:51:53.944,内容理解\nQ135,塔の上のラプンツェル,話し手が興味を持っているのは何ですか？,What is the speaker interested in?,靴とその大きさ,服とその色,髪とその魔法の力,家とその場所,C,再生区間で聞き取れる答えは「髪とその魔法の力」。,00:53:34.420,00:53:37.673,内容理解\nQ136,塔の上のラプンツェル,相手はそれをどうしたいと思っていたと言いますか？,What does she say they wanted to do with it?,人々に分ける,その場に置く,自分たちのものにする,彼女に返す,C,再生区間で聞き取れる答えは「自分たちのものにする」。,00:53:48.392,00:53:50.811,内容理解\nQ137,塔の上のラプンツェル,そのような贈り物をどうする必要があると言いますか？,What does she say must be done with such a gift?,交換する,売る,守る,捨てる,C,再生区間で聞き取れる答えは「守る」。,00:53:56.650,00:53:59.778,内容理解\nQ138,塔の上のラプンツェル,相手が何をするつもりか、改めて確認していますか？,What plan does the speaker ask about again?,手紙を書くこと,眠ること,戻ること,歌うこと,C,再生区間で聞き取れる答えは「戻ること」。,00:54:18.756,00:54:20.883,内容理解\nQ139,塔の上のラプンツェル,その本は誰に読んでいましたか？,Whom did he read the book to?,兵士たち,町の商人,王と王妃,年下の子たち,D,再生区間で聞き取れる答えは「年下の子たち」。,00:54:56.293,00:55:00.297,内容理解\nQ140,塔の上のラプンツェル,本の人物はどれほど裕福だと描かれていますか？,How wealthy is the man in the book described as being?,普通の暮らしをしている,町で二番目のお金持ち,ほとんどお金がない,この世で一番のお金持ち,D,再生区間で聞き取れる答えは「この世で一番のお金持ち」。,00:55:02.132,00:55:06.720,内容理解\nQ141,塔の上のラプンツェル,その人物はどこへ行けたと言っていますか？,Where could that man go?,自分の家の中だけ,森の外だけ,王国の中だけ,行きたい所ならどこへでも,D,再生区間で聞き取れる答えは「行きたい所ならどこへでも」。,00:55:18.565,00:55:20.025,内容理解\nQ142,塔の上のラプンツェル,話を聞いた相手に、何をしないよう求めていますか？,What does he ask the listener not to do?,本を読む,誰かに話す,その場を離れる,食事をする,B,再生区間で聞き取れる答えは「誰かに話す」。,00:55:29.493,00:55:32.287,内容理解\nQ143,塔の上のラプンツェル,母は、男性がどうすると思っていたのですか？,What did she think the man would never do?,眠る,立ち去る,話す,歌う,B,再生区間で聞き取れる答えは「立ち去る」。,00:56:17.666,00:56:20.961,内容理解\nQ144,塔の上のラプンツェル,母は何の音をたどったと言っていますか？,What sound does she say she followed?,雨の音,馬の足音,鐘の音,裏切りの音,D,再生区間で聞き取れる答えは「裏切りの音」。,00:56:30.679,00:56:35.392,内容理解\nQ145,塔の上のラプンツェル,最初の話し手はどこに向かうと言いますか？,Where does the first speaker say they are going?,川,家,城,市場,B,再生区間で聞き取れる答えは「家」。,00:56:37.686,00:56:41.648,内容理解\nQ146,塔の上のラプンツェル,どうして注意がそれていたと言いますか？,Why does the speaker say she was distracted?,話が聞こえなかった,眠っていた,考え事をしていた,道に迷った,C,再生区間で聞き取れる答えは「考え事をしていた」。,00:58:44.688,00:58:50.485,内容理解\nQ147,塔の上のラプンツェル,容姿について、いつからだと言っていますか？,How long does he say he has had his good looks?,生まれたときから,先週から,大人になってから,きのうから,A,再生区間で聞き取れる答えは「生まれたときから」。,00:58:54.364,00:58:57.659,内容理解\nQ148,塔の上のラプンツェル,相手が何をしに来たことを願うと言いますか？,What does the speaker hope the other came to do?,食べ物を買う,道を聞く,謝る,お礼を言う,C,再生区間で聞き取れる答えは「謝る」。,00:59:32.402,00:59:35.197,内容理解\nQ149,塔の上のラプンツェル,最初にどんなことを要求していますか？,What does he ask to happen first?,起こしてもらう,引っ張ってもらう,食べ物をもらう,下に降ろしてもらう,D,再生区間で聞き取れる答えは「下に降ろしてもらう」。,00:59:37.783,00:59:40.494,内容理解\nQ150,塔の上のラプンツェル,相手にどうしてほしいのですか？,What does the speaker want the animal to do?,走り出す,落ち着く,鳴く,後ろを見る,B,再生区間で聞き取れる答えは「落ち着く」。,00:59:57.260,00:59:59.137,内容理解\nQ151,塔の上のラプンツェル,後半の話し手は何を落とすよう言いますか？,What does the second speaker tell him to drop?,かばん,帽子,王冠,ブーツ,D,再生区間で聞き取れる答えは「ブーツ」。,01:00:16.113,01:00:18.573,内容理解\nQ152,塔の上のラプンツェル,話し手はその馬をどう評価しますか？,How does he describe the horse?,とてもおとなしい馬,悪い馬,とても年を取った馬,よく訓練された馬,B,再生区間で聞き取れる答えは「悪い馬」。,01:00:37.801,01:00:39.386,内容理解\nQ153,塔の上のラプンツェル,今日はどんな日だと言っていますか？,How does she describe today?,何もない日,退屈な日,人生でとても大事な日,いつもと同じ日,C,再生区間で聞き取れる答えは「人生でとても大事な日」。,01:00:49.980,01:00:55.193,内容理解\nQ154,塔の上のラプンツェル,どれだけの時間と区切っていますか？,What period of time does she specify?,12時間,24時間,2時間,48時間,B,再生区間で聞き取れる答えは「24時間」。,01:00:59.072,01:01:01.032,内容理解\nQ155,塔の上のラプンツェル,人に何と言って通ろうとしていますか？,What does the speaker say to get past?,すみません,はじめまして,また明日,おやすみ,A,再生区間で聞き取れる答えは「すみません」。,01:02:04.429,01:02:06.723,内容理解\nQ156,塔の上のラプンツェル,何年間、窓から外を見てきたと言っていますか？,How many years does she say she has looked out the window?,20年,18年,8年,10年,B,再生区間で聞き取れる答えは「18年」。,01:05:04.692,01:05:08.988,内容理解\nQ157,塔の上のラプンツェル,話し手は何を心配していますか？,What possibility is she worried about?,雨が降ること,夢に見たほどではないこと,灯りが明るすぎること,船が速すぎること,B,再生区間で聞き取れる答えは「夢に見たほどではないこと」。,01:05:15.370,01:05:18.873,内容理解\nQ158,塔の上のラプンツェル,話し手は相手に何と言っていますか？,What does the speaker say to the other person?,もう帰らなければならない,あなたを探していた,あなたにも渡すものがある,何も持っていない,C,再生区間で聞き取れる答えは「あなたにも渡すものがある」。,01:08:34.360,01:08:37.155,内容理解\nQ159,塔の上のラプンツェル,話し手は気持ちがどう変わったと言いますか？,How does the speaker say her feelings have changed?,まだ怒っている,前より怖い,もう怖くない,退屈になった,C,再生区間で聞き取れる答えは「もう怖くない」。,01:08:40.783,01:08:45.371,内容理解\nQ160,塔の上のラプンツェル,謝ったあと、何と言っていますか？,What does the speaker say after apologizing?,もう遅い,もう帰る,何も問題はない,とても困っている,C,再生区間で聞き取れる答えは「何も問題はない」。,01:10:57.086,01:10:59.881,内容理解\nQ161,塔の上のラプンツェル,顔の毛のどの部分がいい具合に伸びていると言いますか？,Which part of his facial hair does he say is growing nicely?,あごひげ,口ひげ,もみあげ,眉毛,C,再生区間で聞き取れる答えは「もみあげ」。,01:11:29.535,01:11:33.873,内容理解\nQ162,塔の上のラプンツェル,後半の話し手はどんなことを聞いたと言いますか？,What did the second speaker hear?,相手が何か見つけた,相手が眠っていた,相手が家に帰った,相手が道に迷った,A,再生区間で聞き取れる答えは「相手が何か見つけた」。,01:11:51.432,01:11:54.352,内容理解\nQ163,塔の上のラプンツェル,何を持って逃げたと思い始めたと言いますか？,What did he begin to think the other person had run off with?,王冠,馬,剣,マント,A,再生区間で聞き取れる答えは「王冠」。,01:12:11.410,01:12:14.497,内容理解\nQ164,塔の上のラプンツェル,魔法の髪の少女と引き換えに何を渡すと述べていますか？,What is offered in exchange for the girl with magic hair?,王冠,靴,金の花,ろうそく,A,再生区間で聞き取れる答えは「王冠」。,01:12:41.983,01:12:47.321,内容理解\nQ165,塔の上のラプンツェル,後半の話し手は、相手をどう思っていたと言いますか？,How did the second speaker say she felt about the other person?,とても心配していた,うらやましかった,腹を立てていた,忘れていた,A,再生区間で聞き取れる答えは「とても心配していた」。,01:13:21.564,01:13:25.192,内容理解\nQ166,塔の上のラプンツェル,いつ出発しようと言っていますか？,When does the speaker suggest leaving?,夜が明けた後,王が着くまで待ってから,相手が意識を取り戻す前,食事をした後,C,再生区間で聞き取れる答えは「相手が意識を取り戻す前」。,01:13:28.905,01:13:31.574,内容理解\nQ167,塔の上のラプンツェル,ラプンツェルは母について何と言いますか？,What does Rapunzel say about her mother?,すべてについて正しかった,何も知らなかった,すべて忘れていた,何も言わなかった,A,再生区間で聞き取れる答えは「すべてについて正しかった」。,01:14:01.771,01:14:05.733,内容理解\nQ168,塔の上のラプンツェル,何を見つける場合について話していますか？,What does the speaker say it may find?,強い風,ほんのわずかな日差し,冷たい水,暗い部屋,B,再生区間で聞き取れる答えは「ほんのわずかな日差し」。,01:15:38.367,01:15:41.370,内容理解\nQ169,塔の上のラプンツェル,話し手が尋ねているのは何ですか？,What does the speaker demand to know?,城にいつ着いたか,どこで眠ったか,何を食べたか,彼女のことをどうやって知ったか,D,再生区間で聞き取れる答えは「彼女のことをどうやって知ったか」。,01:17:26.767,01:17:28.853,内容理解\nQ170,塔の上のラプンツェル,話し手は自分が誰だと言いますか？,Who does the speaker say she is?,行方不明の姫,王の妹,森の魔法使い,町の商人,A,再生区間で聞き取れる答えは「行方不明の姫」。,01:17:52.001,01:17:53.377,内容理解\nQ171,塔の上のラプンツェル,話し手は自分の話し方について何と尋ねますか？,What does she ask about the way she spoke?,大声すぎたか,ぼそぼそ言ったか,長く話しすぎたか,早口すぎたか,B,再生区間で聞き取れる答えは「ぼそぼそ言ったか」。,01:18:04.096,01:18:06.515,内容理解\nQ172,塔の上のラプンツェル,話し手は男性について何と言いますか？,What does the speaker say about the man?,彼はすぐ来る,彼はそこにいてくれない,彼は一緒に行く,彼は道を知っている,B,再生区間で聞き取れる答えは「彼はそこにいてくれない」。,01:18:37.338,01:18:40.758,内容理解\nQ173,塔の上のラプンツェル,犯罪者はどうなると言っていますか？,What punishment does Gothel say awaits the criminal?,絞首刑,罰金,清掃の仕事,国外追放,A,再生区間で聞き取れる答えは「絞首刑」。,01:18:43.219,01:18:46.305,内容理解\nQ174,塔の上のラプンツェル,話し手は物事が今どうなっていると言いますか？,How does the speaker describe the way things are?,急にすべて変わった,あるべき通りになっている,予定から完全に外れている,まだ何も決まっていない,B,再生区間で聞き取れる答えは「あるべき通りになっている」。,01:18:50.059,01:18:54.980,内容理解\nQ175,塔の上のラプンツェル,相手は誰について間違っていたと言いますか？,Who does the speaker say the other person was wrong about?,王様,馬,話し手自身,兵士たち,C,再生区間で聞き取れる答えは「話し手自身」。,01:18:59.109,01:19:01.612,内容理解\nQ176,塔の上のラプンツェル,後半の話し手は何を開けるよう求めていますか？,What does the second speaker order them to open?,箱,ドア,窓,かばん,B,再生区間で聞き取れる答えは「ドア」。,01:19:42.027,01:19:44.280,内容理解\nQ177,塔の上のラプンツェル,相手に何秒与えると言いますか？,How many seconds does he give the other person?,3秒,5秒,10秒,1秒,A,再生区間で聞き取れる答えは「3秒」。,01:19:46.282,01:19:49.201,内容理解\nQ178,塔の上のラプンツェル,話し手が驚いて言及する調理道具は？,Which cooking item does he mention with surprise?,やかん,まな板,フライパン,オーブン,C,再生区間で聞き取れる答えは「フライパン」。,01:19:59.878,01:20:02.172,内容理解\nQ179,塔の上のラプンツェル,話し手が離す必要があると言っている体の部分は？,What body parts is he told to keep apart?,膝,手,肩,ひじ,A,再生区間で聞き取れる答えは「膝」。,01:20:36.999,01:20:38.959,内容理解\nQ180,塔の上のラプンツェル,彼らを連れてきたか、誰に尋ねていますか？,Whom does he ask whether he brought them?,マックス,パスカル,ラプンツェル,ゴーテル,A,再生区間で聞き取れる答えは「マックス」。,01:20:47.176,01:20:50.220,内容理解\nQ181,塔の上のラプンツェル,もう何ができないと思っていたと言いますか？,What did he think he would never do again?,塔に登る,馬に乗る,ラプンツェルに会う,歌を歌う,C,再生区間で聞き取れる答えは「ラプンツェルに会う」。,01:22:11.802,01:22:14.179,内容理解\nQ182,塔の上のラプンツェル,秘密について、ゴーテルは何と言いますか？,What does Gothel say will happen to their secret?,手紙に書く,彼の死とともに消える,今すぐ王に伝える,明日皆に知られる,B,再生区間で聞き取れる答えは「彼の死とともに消える」。,01:22:25.899,01:22:30.154,内容理解\nQ183,塔の上のラプンツェル,これから行く場所について、何と言いますか？,What does she say about the place they are going?,誰でも来られる,王が待っている,ここから見える,誰にも見つからない,D,再生区間で聞き取れる答えは「誰にも見つからない」。,01:22:34.825,01:22:39.621,内容理解\nQ184,塔の上のラプンツェル,ラプンツェルは何をやめないと言いますか？,What does Rapunzel say she will never stop trying to do?,歌の練習,謝ること,相手から逃げること,髪をとかすこと,C,再生区間で聞き取れる答えは「相手から逃げること」。,01:22:57.723,01:23:01.768,内容理解\nQ185,塔の上のラプンツェル,ラプンツェルはどんな条件なら一緒に行くと言いますか？,On what condition does Rapunzel agree to go with her?,明日まで待ってくれるなら,馬を返してくれるなら,彼を助けさせてくれるなら,塔を修理してくれるなら,C,再生区間で聞き取れる答えは「彼を助けさせてくれるなら」。,01:23:04.062,01:23:08.567,内容理解\nQ186,塔の上のラプンツェル,ラプンツェルは何をしないと約束しますか？,What does Rapunzel promise she will never try to do?,眠る,歌う,逃げる,話す,C,再生区間で聞き取れる答えは「逃げる」。,01:23:13.197,01:23:16.450,内容理解\nQ187,塔の上のラプンツェル,謝ったあと、どうなると言いますか？,What does she say after apologizing?,すぐ家を出る,明日まで待つ,もう間に合わない,すべて大丈夫になる,D,再生区間で聞き取れる答えは「すべて大丈夫になる」。,01:23:54.905,01:23:57.407,内容理解\nQ188,塔の上のラプンツェル,最後に何をするよう促していますか？,What does she ask him to do at the end?,立ち上がる,手を上げる,目を閉じる,息をする,D,再生区間で聞き取れる答えは「息をする」。,01:23:58.575,01:24:01.954,内容理解\nQ189,塔の上のラプンツェル,話し手は、相手がどうなるのを許せないと言いますか？,What does the speaker say he cannot let the other person do?,歌う,死ぬ,話す,眠る,B,再生区間で聞き取れる答えは「死ぬ」。,01:24:04.373,01:24:06.959,内容理解\nQ190,塔の上のラプンツェル,パーティーはどれくらい続きましたか？,How long did the party last?,丸1年,丸1日,丸1週間,丸1か月,C,再生区間で聞き取れる答えは「丸1週間」。,01:29:43.503,01:29:48.216,内容理解\nQ191,塔の上のラプンツェル,この場面の「lasted」はどういう意味ですか？,What does “lasted” mean in this clip?,続いた,始まった,集まった,戻った,A,この場面の lasted は「続いた」の意味。,01:29:43.503,01:29:48.216,語句の意味\nQ192,塔の上のラプンツェル,その人は何の有名な演奏家になりましたか？,What instrument did the famous musician play?,ギター,ピアノ,フルート,バイオリン,B,再生区間で聞き取れる答えは「ピアノ」。,01:29:50.886,01:29:54.222,内容理解\nQ193,塔の上のラプンツェル,その人はついに何を見つけましたか？,What did the man eventually find?,新しい城,失くした鍵,金の花,本当の愛,D,再生区間で聞き取れる答えは「本当の愛」。,01:29:57.559,01:30:00.854,内容理解\nQ194,塔の上のラプンツェル,王国の犯罪はどうなりましたか？,What happened to crime in the kingdom?,ゆっくり増えた,変わらなかった,ほぼ一晩で消えた,すぐ倍になった,C,再生区間で聞き取れる答えは「ほぼ一晩で消えた」。,01:30:09.446,01:30:12.574,内容理解\nQ195,塔の上のラプンツェル,犯罪と同じように、ほとんど消えた食べ物は？,\"What food mostly disappeared, too?\",パン,チーズ,リンゴ,ブドウ,C,再生区間で聞き取れる答えは「リンゴ」。,01:30:09.446,01:30:16.119,内容理解\nQ196,塔の上のラプンツェル,パスカルについて何と語られますか？,What does the narrator say about Pascal?,森に引っ越した,急に話し始めた,ずっと変わらなかった,剣を手に入れた,C,再生区間で聞き取れる答えは「ずっと変わらなかった」。,01:30:17.871,01:30:20.749,内容理解\nQ197,塔の上のラプンツェル,ラプンツェルはついに何を得ましたか？,What did Rapunzel finally have?,自分の船,新しい帽子,魔法の鏡,本当の家族,D,再生区間で聞き取れる答えは「本当の家族」。,01:30:24.836,01:30:28.840,内容理解\nQ198,塔の上のラプンツェル,ラプンツェルは何を治めたと語られていますか？,What did Rapunzel lead?,兵士の一隊,自分の王国,町の市場,小さな船,B,再生区間で聞き取れる答えは「自分の王国」。,01:30:33.261,01:30:36.723,内容理解\nQ199,塔の上のラプンツェル,語り手は再び何と名乗るようになりましたか？,What name did the narrator start using again?,ユージーン,フリン,マキシマス,パスカル,A,再生区間で聞き取れる答えは「ユージーン」。,01:30:39.601,01:30:42.729,内容理解\nQ200,塔の上のラプンツェル,最後に二人は今どう暮らしていると言いますか？,How does she say they are living?,離れて暮らしている,幸せに暮らしている,隠れて暮らしている,旅をしながら暮らしている,B,再生区間で聞き取れる答えは「幸せに暮らしている」。,01:31:03.959,01:31:06.419,内容理解\n";
+const mode=get('mode'), work=get('quiz-work'), number=get('quiz-number'),
+  review=get('quiz-review'), quizError=get('quiz-error'),
+  language=get('quiz-language'), style=get('quiz-style'), order=get('quiz-order');
+let questions=[];
+
+function parseQuestionCsv(source){
+  const input=source.replace(/^\uFEFF/,'');
+  const rows=[];
+  let row=[], field='', quoted=false;
+  for(let i=0;i<input.length;i++){
+    const ch=input[i];
+    if(quoted){
+      if(ch==='"' && input[i+1]==='"'){field+='"';i++;}
+      else if(ch==='"') quoted=false;
+      else field+=ch;
+    }else if(ch==='"' && field==='') quoted=true;
+    else if(ch===','){row.push(field);field='';}
+    else if(ch==='\r'||ch==='\n'){
+      if(ch==='\r' && input[i+1]==='\n') i++;
+      row.push(field);
+      if(row.some(cell=>cell.trim())) rows.push(row);
+      row=[];field='';
+    }else field+=ch;
+  }
+  if(quoted) throw Error('引用符を閉じてください。');
+  row.push(field);
+  if(row.some(cell=>cell.trim())) rows.push(row);
+  const headers=rows.shift()?.map(cell=>cell.trim())||[];
+  const required=['問題ID','作品','問題文_日本語','問題文_英語','選択肢A','選択肢B','選択肢C','選択肢D','正解','日本語解説','開始','終了'];
+  const columns=required.map(name=>headers.indexOf(name));
+  if(!rows.length||columns.includes(-1)) throw Error('付属CSVと同じ列名で問題を用意してください。');
+  const ids=new Set();
+  const timestamp=/^\d{2,}:[0-5]\d:[0-5]\d[.,]\d{3}$/;
+  return rows.map((record,i)=>{
+    const cells=columns.map(index=>record[index]?.trim()||'');
+    const [id,work,ja,en,a,b,c,d,key,explanation,start,end]=cells;
+    if(cells.some(x=>!x)||ids.has(id)||!/^[ABCD]$/.test(key)||
+      new Set([a,b,c,d]).size!==4||!timestamp.test(start)||!timestamp.test(end)||seconds(start)>=seconds(end)){
+      throw Error('問題データの'+(i+1)+'行目を確認してください。');
+    }
+    ids.add(id);
+    return {id,work,ja,en,choices:[a,b,c,d],answer:'ABCD'.indexOf(key),explanation,range:[seconds(start),seconds(end)]};
+  });
+}
+const answers=new Map();
+let quizQuestions=[], quizIndex=0, quizEnd=null;
+const isQuizMode=()=>mode.value==='quiz';
+const currentQuestion=()=>quizQuestions[quizIndex];
+function subtitlesAllowed(){
+  return !isQuizMode() || (answers.has(currentQuestion()?.id) ? review.checked : style.value==='read');
+}
+
+function stopAtQuizEnd(){
+  if(isQuizMode() && quizEnd!==null && player.currentTime>=quizEnd){
+    player.pause();
+    player.currentTime=quizEnd;
+    quizEnd=null;
+  }
+}
+
+function showQuizError(message=''){
+  quizError.textContent=message;
+  quizError.hidden=!message;
+}
+
+function renderQuestion(){
+  const q=currentQuestion();
+  const answer=answers.get(q.id);
+  number.value=String(quizIndex);
+  get('quiz-question').lang=language.value;
+  get('quiz-question').textContent=q[language.value];
+  const completed=quizQuestions.filter(item=>answers.has(item.id));
+  const correct=completed.filter(item=>answers.get(item.id)===item.answer).length;
+  get('quiz-position').textContent='解答 '+completed.length+'/'+quizQuestions.length+' ・ 正解 '+correct;
+  get('quiz-prev').disabled=quizIndex===0;
+  get('quiz-next').disabled=quizIndex===quizQuestions.length-1;
+  get('quiz-review-label').hidden=answer===undefined;
+  get('quiz-options').replaceChildren(...q.choices.map((choice,i)=>{
+    const button=document.createElement('button');
+    button.type='button';
+    button.textContent='ABCD'[i]+'. '+choice;
+    button.disabled=answer!==undefined;
+    if(answer!==undefined && i===q.answer) button.classList.add('correct');
+    if(answer===i && i!==q.answer) button.classList.add('incorrect');
+    button.addEventListener('click',()=>{
+      answers.set(q.id,i);
+      renderQuestion();
+    });
+    return button;
+  }));
+  get('quiz-feedback').textContent=answer===undefined?'':
+    (answer===q.answer?'正解':'正解は「'+q.choices[q.answer]+'」')+'。'+q.explanation;
+  sync();
+}
+
+function changeQuestion(index){
+  if(isQuizMode()) player.pause();
+  quizEnd=null;
+  quizIndex=index;
+  showQuizError();
+  renderQuestion();
+}
+
+function changeWork(){
+  quizQuestions=questions.filter(q=>q.work===work.value);
+  if(order.value==='random') {
+    for(let i=quizQuestions.length-1;i>0;i--) {
+      const j=Math.floor(Math.random()*(i+1));
+      [quizQuestions[i],quizQuestions[j]]=[quizQuestions[j],quizQuestions[i]];
+    }
+  }
+  number.replaceChildren(...quizQuestions.map((q,i)=>new Option(q.id,String(i))));
+  changeQuestion(0);
+}
+
+function setQuestionBank(bank){
+  questions=bank;
+  const works=[...new Set(questions.map(q=>q.work))];
+  work.replaceChildren(...works.map(name=>new Option(name,name)));
+  work.value=works[0];
+  answers.clear();
+  changeWork();
+}
+
+language.addEventListener('change',renderQuestion);
+style.addEventListener('change',sync);
+order.addEventListener('change',changeWork);
+let csvLoad=0;
+get('quiz-csv').addEventListener('change',async event=>{
+  const file=event.target.files[0];
+  const version=++csvLoad;
+  if(!file) return;
+  try{
+    const bank=parseQuestionCsv(await file.text());
+    if(version===csvLoad) setQuestionBank(bank);
+  }catch(error){
+    if(version===csvLoad) showQuizError('CSVを読み込めませんでした。'+error.message);
+  }
+});
+work.addEventListener('change',changeWork);
+number.addEventListener('change',()=>changeQuestion(Number(number.value)));
+get('quiz-prev').addEventListener('click',()=>changeQuestion(quizIndex-1));
+get('quiz-next').addEventListener('click',()=>changeQuestion(quizIndex+1));
+review.addEventListener('change',sync);
+mode.addEventListener('change',()=>{
+  player.pause();
+  quizEnd=null;
+  get('quiz').hidden=!isQuizMode();
+  showQuizError();
+  sync();
+});
+
+get('quiz-play').addEventListener('click',async()=>{
+  if(!url || player.readyState<1){
+    showQuizError('先に、選択した作品と同じ動画または全編MP3を読み込んでください。');
+    return;
+  }
+  const [start,end]=currentQuestion().range;
+  if(start>=player.duration || end>player.duration+0.1){
+    showQuizError('この動画・音声には指定区間がありません。作品とファイルをご確認ください。');
+    return;
+  }
+  showQuizError();
+  player.currentTime=start;
+  quizEnd=Math.min(end,player.duration);
+  try { await player.play(); }
+  catch {
+    quizEnd=null;
+    showQuizError('再生できませんでした。動画・音声形式をご確認ください。');
+  }
+});
+
+setQuestionBank(parseQuestionCsv(builtInCsv));
+
+</script>
